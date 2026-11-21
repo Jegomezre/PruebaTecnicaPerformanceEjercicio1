@@ -1,0 +1,35 @@
+CONCLUSIONES Y HALLAZGOS DEL EJERCICIO
+======================================
+
+1. ELECCION DE LA HERRAMIENTA (K6 VS. JMETER)
+---------------------------------------------
+Entre las dos opciones permitidas en el enunciado (k6 o JMeter), elegí Grafana k6 por las siguientes razones:
+
+- El executor nativo "constant-arrival-rate" de k6 permite fijar directamente las transacciones por segundo (TPS) objetivo de forma independiente al tiempo de respuesta del servidor, asignando dinámicamente los usuarios virtuales (VUs) necesarios para sostener la carga solicitada.
+- Mediante la función nativa handleSummary() genera el reporte HTML (reports/summary.html), el JSON de métricas y el resumen en texto en una sola corrida sin pasos manuales adicionales.
+
+
+2. PARAMETRIZACION DEL CSV Y RESULTADOS OBTENIDOS EN LA PRUEBA
+--------------------------------------------------------------
+El archivo data/users.csv contiene los 5 registros indicados en el enunciado bajo las columnas "user,passwd". En scripts/login-load.js se cargan una sola vez en memoria compartida usando SharedArray y en cada iteración se mapean las columnas "user" -> "username" y "passwd" -> "password" dentro del body JSON enviado por POST a https://fakestoreapi.com/auth/login.
+
+Configuré el escenario con "constant-arrival-rate" a 22 iteraciones por segundo durante 30 segundos (con 30 VUs preasignados y un tope de 60 VUs) para superar de forma sostenida el mínimo de 20 TPS requerido.
+
+Resultados obtenidos en la ejecución (registrados en la carpeta reports/):
+- Total de peticiones: 661 completadas en 30.37s
+- TPS alcanzados: 21.76 TPS promedio global (22.00 iters/s sostenidas en el escenario)
+- Tiempos de respuesta (http_req_duration):
+    avg: 406.28 ms | min: 319.69 ms | med: 392.29 ms | p(90): 464.43 ms | p(95): 498.01 ms | max: 874.82 ms
+- Tasa de error (http_req_failed): 0.00% (0 fallidas de 661)
+- Checks funcionales: 100.00% (1983/1983 exitosos validando status HTTP, token en respuesta y tiempo <= 1.5s)
+
+
+3. HALLAZGOS TECNICOS Y CONCLUSIONES DE RENDIMIENTO
+---------------------------------------------------
+analizando el comportamiento del endpoint https://fakestoreapi.com/auth/login durante la prueba encontré tres puntos relevantes:
+
+- El servicio cumple con buen margen los dos criterios de aceptación bajo una carga de ~22 TPS: tanto el percentil 95 (498.01 ms) como el tiempo máximo registrado en toda la corrida (874.82 ms) estuvieron muy por debajo del límite permitido de 1,5 segundos (1500 ms), y la tasa de error fue del 0.00% frente al máximo aceptable del 3%.
+
+- Aunque es un endpoint de login (POST /auth/login) que no persiste un recurso nuevo en base de datos, FakeStoreAPI responde con código HTTP 201 Created devolviendo el JSON {"token": "<jwt>"} en lugar del habitual 200 OK. Por esta razón contemplé ambos códigos (200 o 201) junto con la verificación de que la propiedad "token" venga en el cuerpo de la respuesta.
+
+- La latencia del servicio se mantuvo estable entre los 319 ms y los 500 ms (casi todo el tiempo corresponde a http_req_waiting del servidor con un promedio de 406.16 ms), por lo que a k6 le bastó mantener entre 7 y 10 VUs concurrentes activos para sostener las 22 peticiones por segundo sin encolamiento.
